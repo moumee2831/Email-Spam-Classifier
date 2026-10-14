@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Email Spam Classifier | Machine Learning Security Dashboard</title>
+  <meta name="description" content="AI-powered Email Spam Classifier using machine learning to detect unsolicited spam and legitimate ham emails with high precision.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <!-- Ambient background glow elements -->
+  <div class="ambient-glow glow-1" aria-hidden="true"></div>
+  <div class="ambient-glow glow-2" aria-hidden="true"></div>
+
+  <div class="page-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="header-badge">
+        <span class="badge-dot"></span>
+        <span class="badge-text">Machine Learning Powered</span>
+      </div>
+      <h1 class="main-title">Email Spam Classifier</h1>
+      <p class="subtitle">
+        Analyze email subjects and message contents in real-time to detect fraudulent spam or authentic ham emails.
+      </p>
+
+      <!-- Model Stats Bar -->
+      <div class="model-stats-card">
+        <div class="stat-item">
+          <span class="stat-label">Model Architecture</span>
+          <span class="stat-value font-mono">{{ model_name }}</span>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat-item">
+          <span class="stat-label">Test Accuracy</span>
+          <span class="stat-value text-accent font-mono">
+            {% if test_accuracy is not none %}
+              {{ test_accuracy }}%
+            {% else %}
+              <span class="text-muted">N/A</span>
+            {% endif %}
+          </span>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat-item">
+          <span class="stat-label">Status</span>
+          {% if model_loaded %}
+            <span class="stat-status status-online">
+              <span class="pulse-indicator"></span> Ready
+            </span>
+          {% else %}
+            <span class="stat-status status-offline">
+              <span class="error-indicator"></span> Error
+            </span>
+          {% endif %}
+        </div>
+      </div>
+    </header>
+
+    <!-- System Alerts if any load failed -->
+    {% if model_load_error or metadata_load_error %}
+    <div class="alert alert-danger" role="alert">
+      <div class="alert-icon">⚠️</div>
+      <div class="alert-content">
+        <strong>System Notice:</strong>
+        {% if model_load_error %}<div>{{ model_load_error }}</div>{% endif %}
+        {% if metadata_load_error %}<div>{{ metadata_load_error }}</div>{% endif %}
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Main Dashboard Grid -->
+    <main class="dashboard-grid">
+      <!-- Left Column: Input Form -->
+      <section class="card form-card">
+        <div class="card-header">
+          <div class="card-title-group">
+            <h2 class="card-title">Analyze Email</h2>
+            <p class="card-description">Paste or type your email details below for classification.</p>
+          </div>
+          <!-- Sample Loaders -->
+          <div class="sample-actions">
+            <span class="samples-title">Quick Samples:</span>
+            <button type="button" class="btn-chip" id="load-sample-spam" title="Load sample spam email">
+              🚨 Sample Spam
+            </button>
+            <button type="button" class="btn-chip" id="load-sample-ham" title="Load sample safe email">
+              ✉️ Sample Ham
+            </button>
+          </div>
+        </div>
+
+        <form action="/" method="POST" id="classifier-form" novalidate>
+          <!-- Client/Server Error Banner -->
+          <div id="form-error-banner" class="alert alert-warning {% if not error %}hidden{% endif %}">
+            <span class="alert-icon">⚠️</span>
+            <span class="alert-text" id="form-error-text">{{ error }}</span>
+          </div>
+
+          <!-- Subject Input -->
+          <div class="form-group">
+            <label for="subject" class="form-label">
+              <span>Email Subject</span>
+              <span class="optional-tag">(Optional)</span>
+            </label>
+            <div class="input-wrapper">
+              <input 
+                type="text" 
+                id="subject" 
+                name="subject" 
+                class="form-control" 
+                placeholder="e.g., Urgent: Claim your complimentary gift card now!" 
+                value="{{ subject or '' }}"
+                autocomplete="off"
+              >
+            </div>
+          </div>
+
+          <!-- Message Input -->
+          <div class="form-group">
+            <label for="message" class="form-label">
+              <span>Email Message</span>
+              <span class="required-indicator">*</span>
+            </label>
+            <div class="input-wrapper">
+              <textarea 
+                id="message" 
+                name="message" 
+                class="form-control text-area" 
+                rows="6" 
+                placeholder="Type or paste the email body text here..."
+              >{{ message or '' }}</textarea>
+            </div>
+            <div class="char-count-bar">
+              <span id="char-counter">0 characters</span>
+            </div>
+          </div>
+
+          <!-- Action Buttons -->
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary" id="btn-check">
+              <span class="btn-spinner hidden" id="spinner"></span>
+              <span class="btn-icon">🔍</span>
+              <span class="btn-text" id="btn-text">Check Email</span>
+            </button>
+            <button type="button" class="btn btn-secondary" id="btn-clear">
+              <span class="btn-icon">↺</span>
+              <span class="btn-text">Clear</span>
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <!-- Right Column: Result Panel -->
+      <section class="card result-card" id="result-section">
+        <div class="card-header">
+          <div class="card-title-group">
+            <h2 class="card-title">Prediction Result</h2>
+            <p class="card-description">AI assessment & confidence breakdown.</p>
+          </div>
+        </div>
+
+        <!-- Initial Placeholder State (when no prediction has run) -->
+        <div id="result-placeholder" class="result-placeholder {% if result %}hidden{% endif %}">
+          <div class="placeholder-art">
+            <div class="shield-icon">🛡️</div>
+          </div>
+          <h3>Awaiting Input</h3>
+          <p>Fill out the email fields and click <strong>Check Email</strong> to see the classification outcome and probability scores.</p>
+        </div>
+
+        <!-- Active Result State -->
+        <div id="result-display" class="result-display {% if not result %}hidden{% endif %}">
+          <div 
+            id="result-badge-card" 
+            class="badge-card {% if result and result.is_spam %}is-spam{% elif result %}is-ham{% endif %}"
+          >
+            <div class="badge-icon-wrap" id="badge-icon">
+              {% if result and result.is_spam %}🚨{% else %}✅{% endif %}
+            </div>
+            <div class="badge-details">
+              <div class="badge-category" id="badge-category">
+                {% if result and result.is_spam %}DETECTED AS{% else %}VERIFIED AS{% endif %}
+              </div>
+              <div class="badge-verdict" id="badge-verdict">
+                {{ result.label if result else '' }}
+              </div>
+            </div>
+          </div>
+
+          <!-- Explanation Message -->
+          <p class="result-summary-text" id="result-summary">
+            {% if result and result.is_spam %}
+              This email matches known spam, promotional, or fraudulent patterns. Treat it with caution and avoid clicking untrusted links.
+            {% elif result %}
+              This email appears legitimate, safe, and authentic based on linguistic features learned by the model.
+            {% endif %}
+          </p>
+
+          <!-- Confidence / Probability Breakdown -->
+          <div class="probability-section">
+            <div class="probability-header">
+              <span>Model Confidence</span>
+              <span class="confidence-val font-mono" id="confidence-percentage">
+                {% if result and result.confidence is not none %}
+                  {{ result.confidence }}%
+                {% else %}
+                  --
+                {% endif %}
+              </span>
+            </div>
+            <div class="probability-track">
+              <div 
+                id="probability-fill" 
+                class="probability-fill {% if result and result.is_spam %}fill-spam{% else %}fill-ham{% endif %}"
+                style="width: {{ result.confidence if (result and result.confidence) else 50 }}%;"
+              ></div>
+            </div>
+
+            <!-- Two-sided distribution -->
+            <div class="prob-distribution">
+              <div class="prob-pill pill-ham">
+                <span class="prob-dot"></span>
+                <span>Ham (Legitimate):</span>
+                <strong class="font-mono" id="ham-prob-text">
+                  {% if result and result.ham_probability is not none %}{{ result.ham_probability }}%{% else %}--{% endif %}
+                </strong>
+              </div>
+              <div class="prob-pill pill-spam">
+                <span class="prob-dot"></span>
+                <span>Spam (Unwanted):</span>
+                <strong class="font-mono" id="spam-prob-text">
+                  {% if result and result.spam_probability is not none %}{{ result.spam_probability }}%{% else %}--{% endif %}
+                </strong>
+              </div>
+            </div>
+          </div>
+
+          <!-- Model Accuracy Proof Card -->
+          <div class="metadata-banner">
+            <div class="meta-icon">📊</div>
+            <div class="meta-info">
+              <span class="meta-title">Verified Model Benchmark</span>
+              <span class="meta-desc">
+                Tested accuracy of <strong>{{ test_accuracy }}%</strong> using scikit-learn on the test dataset.
+              </span>
+            </div>
+          </div>
+
+          <!-- Disclaimer -->
+          <p class="disclaimer-note">
+            ⚠️ <em>Disclaimer: Predictions are generated by machine learning algorithms and are not guaranteed to be 100% accurate. Always exercise caution with suspicious emails.</em>
+          </p>
+        </div>
+      </section>
+    </main>
+
+    <!-- Educational Guide Card: Spam vs Ham -->
+    <section class="card education-card">
+      <div class="education-header">
+        <h2 class="education-title">💡 Understanding Email Classification: Spam vs Ham</h2>
+        <span class="education-subtitle">A quick beginner guide on email terminology and safety</span>
+      </div>
+
+      <div class="education-grid">
+        <div class="edu-box spam-box">
+          <div class="edu-box-header">
+            <span class="edu-icon">🚨</span>
+            <h3>What is SPAM?</h3>
+          </div>
+          <p>
+            <strong>Spam</strong> refers to unsolicited, unwanted, or harmful bulk messages. It often includes fraudulent financial requests, phishing scams to steal passwords, fake lottery wins, or deceptive advertising.
+          </p>
+          <ul class="edu-list">
+            <li>Contains suspicious links or urgent demands for money</li>
+            <li>Unrecognized senders promising unrealistic rewards</li>
+            <li>Grammatical anomalies or spoofed domains</li>
+          </ul>
+        </div>
+
+        <div class="edu-box ham-box">
+          <div class="edu-box-header">
+            <span class="edu-icon">✉️</span>
+            <h3>What is HAM?</h3>
+          </div>
+          <p>
+            <strong>Ham</strong> is the computer science term for legitimate, non-spam email. These are normal communications that the recipient expects or wants to receive, such as personal chats, work emails, or receipts.
+          </p>
+          <ul class="edu-list">
+            <li>Work correspondence, meeting notes, project updates</li>
+            <li>Personal conversations with colleagues and family</li>
+            <li>Expected newsletters, order receipts, and confirmations</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+      <p>Built with Python Flask & Scikit-Learn | Academic & Educational Project</p>
+    </footer>
+  </div>
+
+  <!-- Interactive JavaScript for Seamless Experience -->
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      const form = document.getElementById("classifier-form");
+      const subjectInput = document.getElementById("subject");
+      const messageInput = document.getElementById("message");
+      const charCounter = document.getElementById("char-counter");
+      const errorBanner = document.getElementById("form-error-banner");
+      const errorText = document.getElementById("form-error-text");
+      const btnCheck = document.getElementById("btn-check");
+      const btnClear = document.getElementById("btn-clear");
+      const btnText = document.getElementById("btn-text");
+      const spinner = document.getElementById("spinner");
+
+      const resultPlaceholder = document.getElementById("result-placeholder");
+      const resultDisplay = document.getElementById("result-display");
+      const resultBadgeCard = document.getElementById("result-badge-card");
+      const badgeIcon = document.getElementById("badge-icon");
+      const badgeCategory = document.getElementById("badge-category");
+      const badgeVerdict = document.getElementById("badge-verdict");
+      const resultSummary = document.getElementById("result-summary");
+      const confidencePercentage = document.getElementById("confidence-percentage");
+      const probabilityFill = document.getElementById("probability-fill");
+      const hamProbText = document.getElementById("ham-prob-text");
+      const spamProbText = document.getElementById("spam-prob-text");
+
+      const btnSampleSpam = document.getElementById("load-sample-spam");
+      const btnSampleHam = document.getElementById("load-sample-ham");
+
+      // Character counter
+      function updateCharCount() {
+        const totalLen = (subjectInput.value.length) + (messageInput.value.length);
+        charCounter.textContent = `${totalLen} characters`;
+      }
+      subjectInput.addEventListener("input", updateCharCount);
+      messageInput.addEventListener("input", updateCharCount);
+      updateCharCount();
+
+      // Show/Hide error banner
+      function showError(msg) {
+        errorText.textContent = msg;
+        errorBanner.classList.remove("hidden");
+        errorBanner.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+
+      function hideError() {
+        errorBanner.classList.add("hidden");
+        errorText.textContent = "";
+      }
+
+      // Quick Samples
+      btnSampleSpam.addEventListener("click", function () {
+        subjectInput.value = "CONGRATULATIONS! You won a $1,000 Walmart Gift Card!";
+        messageInput.value = "Claim your $1,000 gift card reward right now! Click here to enter your details immediately. Limited time promotion for chosen winners only!";
+        hideError();
+        updateCharCount();
+      });
+
+      btnSampleHam.addEventListener("click", function () {
+        subjectInput.value = "Project Status & Team Meeting Tomorrow";
+        messageInput.value = "Hi team, please find attached the quarterly status report. We will review the core deliverables tomorrow morning at 10:00 AM in Conference Room B.";
+        hideError();
+        updateCharCount();
+      });
+
+      // Clear button
+      btnClear.addEventListener("click", function () {
+        subjectInput.value = "";
+        messageInput.value = "";
+        updateCharCount();
+        hideError();
+        resultDisplay.classList.add("hidden");
+        resultPlaceholder.classList.remove("hidden");
+      });
+
+      // AJAX form submission for smooth UI without reload
+      form.addEventListener("submit", async function (e) {
+        e.preventDefault();
+        hideError();
+
+        const subjectVal = subjectInput.value.trim();
+        const messageVal = messageInput.value.trim();
+
+        if (!subjectVal && !messageVal) {
+          showError("Please enter an Email Subject or Message body before checking.");
+          return;
+        }
+
+        // Loading state
+        btnCheck.disabled = true;
+        btnText.textContent = "Analyzing...";
+        spinner.classList.remove("hidden");
+
+        try {
+          const response = await fetch("/api/predict", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              subject: subjectVal,
+              message: messageVal
+            })
+          });
+
+          const data = await response.json();
+
+          if (!response.ok || !data.success) {
+            showError(data.error || "Prediction request failed.");
+            return;
+          }
+
+          renderResult(data.result);
+        } catch (err) {
+          console.error("Fetch error:", err);
+          // If AJAX fails for any network reason, fallback to native submit
+          form.submit();
+        } finally {
+          btnCheck.disabled = false;
+          btnText.textContent = "Check Email";
+          spinner.classList.add("hidden");
+        }
+      });
+
+      function renderResult(res) {
+        resultPlaceholder.classList.add("hidden");
+        resultDisplay.classList.remove("hidden");
+
+        if (res.is_spam) {
+          resultBadgeCard.className = "badge-card is-spam";
+          badgeIcon.textContent = "🚨";
+          badgeCategory.textContent = "DETECTED AS";
+          badgeVerdict.textContent = "SPAM";
+          resultSummary.textContent = "This email matches known spam, promotional, or fraudulent patterns. Treat it with caution and avoid clicking untrusted links.";
+          probabilityFill.className = "probability-fill fill-spam";
+        } else {
+          resultBadgeCard.className = "badge-card is-ham";
+          badgeIcon.textContent = "✅";
+          badgeCategory.textContent = "VERIFIED AS";
+          badgeVerdict.textContent = "HAM";
+          resultSummary.textContent = "This email appears legitimate, safe, and authentic based on linguistic features learned by the model.";
+          probabilityFill.className = "probability-fill fill-ham";
+        }
+
+        const conf = res.confidence !== null ? res.confidence : 50;
+        confidencePercentage.textContent = res.confidence !== null ? `${res.confidence}%` : "--";
+        probabilityFill.style.width = `${conf}%`;
+
+        hamProbText.textContent = res.ham_probability !== null ? `${res.ham_probability}%` : "--";
+        spamProbText.textContent = res.spam_probability !== null ? `${res.spam_probability}%` : "--";
+
+        // Scroll into view on mobile
+        if (window.innerWidth < 900) {
+          resultDisplay.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      }
+    });
+  </script>
+</body>
+</html>
